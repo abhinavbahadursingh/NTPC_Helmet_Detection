@@ -1,0 +1,29 @@
+<component name="InspectionProjectProfileManager">
+  <profile version="1.0">
+    <option name="myName" value="Project Default" />
+    <inspection_tool class="PyPackageRequirementsInspection" enabled="false" level="WARNING" enabled_by_default="false">
+      <option name="ignoredPackages">
+        <list>
+          <option value="opencv-python" />
+          <option value="mediapipe" />
+          <option value="pycaw" />
+          <option value="pygame" />
+          <option value="numpy" />
+          <option value="fastapi" />
+          <option value="uvicorn" />
+          <option value="openai" />
+          <option value="python-dotenv" />
+          <option value="pandas" />
+          <option value="matplotlib" />
+          <option value="gTTS" />
+          <option value="pyaudio" />
+          <option value="playsound" />
+          <option value="cx-Freeze" />
+          <option value="deep-translator" />
+          <option value="SpeechRecognition" />
+          <option value="google-transliteration-api" />
+        </list>
+      </option>
+    </inspection_tool>
+  </profile>
+</component>
