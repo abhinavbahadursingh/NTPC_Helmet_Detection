@@ -249,14 +249,3 @@ The app integrates with top-performing hard-hat detection repositories from Hugg
 - [ ] **RTSP CCTV Stream Support**: Multi-camera industrial IP camera integration.
 - [ ] **Multi-PPE Detection**: Extend support to safety vests, gloves, goggles, and safety boots.
 
----
-
-## 🤝 Contributing
-
-Contributions, issues, and feature requests are welcome! Feel free to check out issues or submit a pull request.
-
----
-
-## 📜 License
-
-This project is open-source and available under the [MIT License](LICENSE).
