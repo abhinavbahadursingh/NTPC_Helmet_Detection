@@ -10,6 +10,9 @@ Requirements (see requirements.txt):
     pip install streamlit ultralytics opencv-python-headless pillow numpy huggingface_hub
 """
 
+import base64
+import torch
+
 import cv2
 import numpy as np
 import streamlit as st
@@ -57,6 +60,9 @@ else:
 
 conf_thresh = st.sidebar.slider("Confidence threshold", 0.1, 1.0, 0.4, 0.05)
 
+# Alarm sound toggle - plays "alarm.mp3" whenever a person without a helmet is detected
+alarm_enabled = st.sidebar.toggle("🔊 Play alarm on violation", value=True)
+
 source = st.sidebar.radio("Input source", ["Image", "Video", "Camera", "Live Webcam"])
 
 
@@ -85,6 +91,36 @@ def get_model():
         st.stop()
 
 
+# ----------------------------------------------------------------------
+# Alarm sound helpers
+# ----------------------------------------------------------------------
+@st.cache_resource
+def load_alarm_audio_b64():
+    """Read alarm.mp3 once and cache its base64 encoding for embedding in HTML <audio> tags."""
+    try:
+        with open("alarm.mp3", "rb") as f:
+            data = f.read()
+        return base64.b64encode(data).decode("utf-8")
+    except Exception as e:
+        st.sidebar.warning(f"Could not load alarm.mp3: {e}")
+        return None
+
+
+def play_alarm(placeholder):
+    """Play alarm.mp3 once via an autoplaying, hidden HTML5 audio element rendered into `placeholder`."""
+    audio_b64 = load_alarm_audio_b64()
+    if not audio_b64:
+        return
+    placeholder.markdown(
+        f"""
+        <audio autoplay="true" style="display:none;">
+            <source src="data:audio/mp3;base64,{audio_b64}" type="audio/mp3">
+        </audio>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def annotate_frame(frame_bgr, model, conf):
     """Run detection on a single BGR frame.
     Returns:
@@ -93,8 +129,20 @@ def annotate_frame(frame_bgr, model, conf):
         total_people: Count of people in the frame
         no_helmet_count: Count of people not wearing a helmet
     """
-    results = model.predict(frame_bgr, conf=conf, verbose=False)
-    annotated = results[0].plot()  # returns BGR numpy array with boxes drawn
+    # results = model.predict(frame_bgr, conf=conf, verbose=False)
+    device = 0 if torch.cuda.is_available() else "cpu"
+
+    results = model.predict(
+        frame_bgr,
+        imgsz=640,
+        conf=conf,
+        verbose=False,
+        half=torch.cuda.is_available(),
+        device=device,
+        max_det=25
+    )   
+    # annotated = results[0].plot()  # returns BGR numpy array with boxes drawn
+    annotated = results[0].plot()
     
     helmet_detected = False
     total_people = 0
@@ -218,7 +266,7 @@ def trigger_no_helmet_popup(total_people, no_helmet_count):
                             cursor: pointer;
                             padding: 0;
                             line-height: 1;
-                        ">×</button>
+                        "></button>
                     </div>
                     <p style="font-size: 13px; color: #cbd5e1; margin: 8px 0 12px 0; line-height: 1.4;">
                         Personnel without safety helmets detected.
@@ -305,9 +353,13 @@ if source == "Image":
         # Display analysis statistics
         display_stats(total_people, no_helmet_count)
 
+        alarm_holder = st.empty()
+
         # Trigger popup if no helmet is detected
         if no_helmet_count > 0:
             trigger_no_helmet_popup(total_people, no_helmet_count)
+            if alarm_enabled:
+                play_alarm(alarm_holder)
             st.markdown(
                 """
                 <div style="
@@ -391,6 +443,7 @@ elif source == "Video":
         status_holder = st.empty()
         stats_holder = st.empty()
         popup_holder = st.empty()
+        alarm_holder = st.empty()
         progress = st.progress(0)
         frame_count = 0
 
@@ -415,11 +468,12 @@ elif source == "Video":
                 if no_helmet_count > 0:
                     with popup_holder:
                         trigger_no_helmet_popup(total_people, no_helmet_count)
-                    if not popup_triggered:
-                        st.toast("🚨 Warning: Personnel without helmet detected!", icon="⚠️")
-                        popup_triggered = True
+                    if alarm_enabled:
+                        play_alarm(alarm_holder)
                 else:
                     popup_holder.empty()
+                    alarm_holder.empty()
+                    popup_triggered = False
 
                 # Update status badge dynamically
                 if no_helmet_count > 0:
@@ -508,9 +562,13 @@ elif source == "Camera":
         # Display analysis statistics
         display_stats(total_people, no_helmet_count)
 
+        alarm_holder = st.empty()
+
         # Trigger warning popup
         if no_helmet_count > 0:
             trigger_no_helmet_popup(total_people, no_helmet_count)
+            if alarm_enabled:
+                play_alarm(alarm_holder)
             st.markdown(
                 """
                 <div style="
@@ -587,79 +645,110 @@ elif source == "Live Webcam":
         return available
 
     st.subheader("Camera source")
-    cam_source_type = st.radio(
-        "Where should the video come from?",
-        ["Local webcam", "IP camera (URL)"],
-        horizontal=True,
-        key="cam_source_type",
-    )
 
     video_source = None  # what gets passed to cv2.VideoCapture()
 
-    if cam_source_type == "Local webcam":
-        col_scan, col_select = st.columns([1, 2])
+    col_local, col_ip = st.columns(2)
 
-        with col_scan:
-            if st.button("🔍 Scan for cameras"):
-                with st.spinner("Checking connected cameras..."):
-                    st.session_state["available_cameras"] = scan_local_cameras()
+    # ---- Left column: local webcam ----
+    with col_local:
+        st.markdown("**🎥 Local webcam**")
+        if st.button("🔍 Scan for cameras", use_container_width=True):
+            with st.spinner("Checking connected cameras..."):
+                st.session_state["available_cameras"] = scan_local_cameras()
 
         available_cameras = st.session_state.get("available_cameras")
 
-        with col_select:
-            if available_cameras is None:
-                st.info("Click 'Scan for cameras' to detect the webcams connected to this machine.")
-            elif len(available_cameras) == 0:
-                st.warning("No local cameras were detected.")
-            else:
-                labels = {idx: f"Camera {idx}" for idx in available_cameras}
-                chosen_idx = st.selectbox(
-                    "Select a camera",
-                    options=available_cameras,
-                    format_func=lambda i: labels[i],
-                    key="chosen_camera_index",
-                )
-                video_source = chosen_idx
+        if available_cameras is None:
+            st.caption("Click scan to detect webcams on this machine.")
+        elif len(available_cameras) == 0:
+            st.caption("⚠️ No local cameras detected.")
+        else:
+            labels = {idx: f"Camera {idx}" for idx in available_cameras}
+            chosen_idx = st.selectbox(
+                "Select a camera",
+                options=available_cameras,
+                format_func=lambda i: labels[i],
+                key="chosen_camera_index",
+                label_visibility="collapsed",
+            )
+            local_source = chosen_idx
+        if available_cameras:
+            use_local = st.checkbox("Use local webcam", key="use_local_cam")
+            if use_local:
+                video_source = local_source
 
-    else:  # IP camera
-        st.caption(
-            "Enter the stream URL of your IP camera, e.g. "
-            "`rtsp://username:password@192.168.1.10:554/stream1` or "
-            "`http://192.168.1.10:8080/video` (common for IP Webcam apps)."
+    # ---- Right column: IP camera ----
+    with col_ip:
+        st.markdown("**🌐 IP camera**")
+        SAVED_IP_CAMERAS = {
+            "Site camera (channel 1)": "rtsp://admin:Ntpc%40123@192.168.1.250:554/video/live?channel=1&subtype=1",
+        }
+        ip_choice = st.selectbox(
+            "IP camera",
+            options=list(SAVED_IP_CAMERAS.keys()) + ["Enter your own URL"],
+            key="ip_camera_choice",
+            label_visibility="collapsed",
         )
-        ip_url = st.text_input("IP camera URL", value="", placeholder="rtsp://user:pass@192.168.1.10:554/stream1")
-        if ip_url:
-            video_source = ip_url
 
-        if st.button("Test connection") and ip_url:
-            with st.spinner("Connecting to IP camera..."):
+        if ip_choice == "Enter your own URL":
+            ip_url = st.text_input(
+                "IP camera URL",
+                value="",
+                placeholder="rtsp://user:pass@192.168.1.10:554/stream1",
+                label_visibility="collapsed",
+            )
+        else:
+            ip_url = SAVED_IP_CAMERAS[ip_choice]
+            st.caption(f"`{ip_url}`")
+
+        btn_col, use_col = st.columns(2)
+        with btn_col:
+            test_clicked = st.button("Test", use_container_width=True)
+        with use_col:
+            use_ip = st.checkbox("Use this", key="use_ip_cam")
+
+        if test_clicked and ip_url:
+            with st.spinner("Connecting..."):
                 test_cap = cv2.VideoCapture(ip_url)
                 ok = test_cap.isOpened()
                 if ok:
                     ok, _ = test_cap.read()
                 test_cap.release()
             if ok:
-                st.success("Connected successfully.")
+                st.success("Connected ✅", icon="✅")
             else:
-                st.error("Could not connect to the camera at that URL. Check the address, credentials, and that the device is reachable on the network.")
+                st.error("Connection failed. Check URL/credentials/network.")
+
+        if use_ip and ip_url:
+            video_source = ip_url
 
     run_live = st.toggle("Start Live Webcam Feed", value=False, disabled=(video_source is None))
     if video_source is None:
-        st.caption("Select or enter a camera source above to enable the live feed.")
+        st.caption("Pick a camera on the left or right (and check its 'Use' box) to enable the live feed.")
 
     if run_live and video_source is not None:
         model = get_model()
         cap = cv2.VideoCapture(video_source)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        cap.set(cv2.CAP_PROP_FPS, 15)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 360)
         
         # Create empty placeholders
         stframe = st.empty()
         status_holder = st.empty()
         stats_holder = st.empty()
         popup_holder = st.empty()
+        alarm_holder = st.empty()
         
         try:
             popup_triggered = False
             while run_live:
+                # ret, frame = cap.read()
+                for _ in range(3):
+                    cap.grab()
+
                 ret, frame = cap.read()
                 if not ret:
                     st.error("Failed to access the camera. Please make sure it's connected/reachable and not in use by another app.")
@@ -678,11 +767,13 @@ elif source == "Live Webcam":
                 if no_helmet_count > 0:
                     with popup_holder:
                         trigger_no_helmet_popup(total_people, no_helmet_count)
-                    if not popup_triggered:
-                        st.toast("🚨 Warning: Personnel without helmet detected!", icon="⚠️")
-                        popup_triggered = True
+                    
+                    if alarm_enabled:
+                        play_alarm(alarm_holder)
                 else:
                     popup_holder.empty()
+                    alarm_holder.empty()
+                    popup_triggered = False
 
                 # Update status badge dynamically
                 if no_helmet_count > 0:
