@@ -572,11 +572,84 @@ elif source == "Camera":
 # LIVE WEBCAM MODE (continuous real-time detection)
 # ----------------------------------------------------------------------
 elif source == "Live Webcam":
-    run_live = st.toggle("Start Live Webcam Feed", value=False)
-    
-    if run_live:
+
+    def scan_local_cameras(max_index=8):
+        """Probe camera indices 0..max_index-1 and return the ones that open successfully."""
+        available = []
+        for idx in range(max_index):
+            cap_test = cv2.VideoCapture(idx)
+            if cap_test is not None and cap_test.isOpened():
+                # Try to grab a frame to make sure it's a real, usable device
+                ok, _ = cap_test.read()
+                if ok:
+                    available.append(idx)
+            cap_test.release()
+        return available
+
+    st.subheader("Camera source")
+    cam_source_type = st.radio(
+        "Where should the video come from?",
+        ["Local webcam", "IP camera (URL)"],
+        horizontal=True,
+        key="cam_source_type",
+    )
+
+    video_source = None  # what gets passed to cv2.VideoCapture()
+
+    if cam_source_type == "Local webcam":
+        col_scan, col_select = st.columns([1, 2])
+
+        with col_scan:
+            if st.button("🔍 Scan for cameras"):
+                with st.spinner("Checking connected cameras..."):
+                    st.session_state["available_cameras"] = scan_local_cameras()
+
+        available_cameras = st.session_state.get("available_cameras")
+
+        with col_select:
+            if available_cameras is None:
+                st.info("Click 'Scan for cameras' to detect the webcams connected to this machine.")
+            elif len(available_cameras) == 0:
+                st.warning("No local cameras were detected.")
+            else:
+                labels = {idx: f"Camera {idx}" for idx in available_cameras}
+                chosen_idx = st.selectbox(
+                    "Select a camera",
+                    options=available_cameras,
+                    format_func=lambda i: labels[i],
+                    key="chosen_camera_index",
+                )
+                video_source = chosen_idx
+
+    else:  # IP camera
+        st.caption(
+            "Enter the stream URL of your IP camera, e.g. "
+            "`rtsp://username:password@192.168.1.10:554/stream1` or "
+            "`http://192.168.1.10:8080/video` (common for IP Webcam apps)."
+        )
+        ip_url = st.text_input("IP camera URL", value="", placeholder="rtsp://user:pass@192.168.1.10:554/stream1")
+        if ip_url:
+            video_source = ip_url
+
+        if st.button("Test connection") and ip_url:
+            with st.spinner("Connecting to IP camera..."):
+                test_cap = cv2.VideoCapture(ip_url)
+                ok = test_cap.isOpened()
+                if ok:
+                    ok, _ = test_cap.read()
+                test_cap.release()
+            if ok:
+                st.success("Connected successfully.")
+            else:
+                st.error("Could not connect to the camera at that URL. Check the address, credentials, and that the device is reachable on the network.")
+
+    run_live = st.toggle("Start Live Webcam Feed", value=False, disabled=(video_source is None))
+    if video_source is None:
+        st.caption("Select or enter a camera source above to enable the live feed.")
+
+    if run_live and video_source is not None:
         model = get_model()
-        cap = cv2.VideoCapture(0)
+        cap = cv2.VideoCapture(video_source)
         
         # Create empty placeholders
         stframe = st.empty()
@@ -589,7 +662,7 @@ elif source == "Live Webcam":
             while run_live:
                 ret, frame = cap.read()
                 if not ret:
-                    st.error("Failed to access the webcam. Please make sure it's connected and not in use by another app.")
+                    st.error("Failed to access the camera. Please make sure it's connected/reachable and not in use by another app.")
                     break
                     
                 annotated_bgr, helmet_detected, total_people, no_helmet_count = annotate_frame(frame, model, conf_thresh)

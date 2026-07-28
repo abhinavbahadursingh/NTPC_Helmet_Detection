@@ -157,6 +157,22 @@ E:\NTPC_Helmet_Detection\
 
 ---
 
+## 📥 Model Weights
+
+If you want to use the custom trained model directly, download the model weights from the following Google Drive link:
+
+Model Weights (.pt):
+https://drive.google.com/file/d/1xSq3dO2P-uRQ3cDAHVtABg017DSwVRQi/view?usp=sharing
+
+After downloading:
+1. Place the `.pt` file inside the project directory (or any preferred location).
+2. In the Streamlit sidebar, select **Custom model path**.
+3. Browse or enter the path to the downloaded `.pt` file.
+4. Start detection using your custom weights.
+
+---
+
+
 ## 📖 Usage Guide
 
 Once the Streamlit server starts, open your browser at `http://localhost:8501`.
@@ -249,14 +265,3 @@ The app integrates with top-performing hard-hat detection repositories from Hugg
 - [ ] **RTSP CCTV Stream Support**: Multi-camera industrial IP camera integration.
 - [ ] **Multi-PPE Detection**: Extend support to safety vests, gloves, goggles, and safety boots.
 
----
-
-## 🤝 Contributing
-
-Contributions, issues, and feature requests are welcome! Feel free to check out issues or submit a pull request.
-
----
-
-## 📜 License
-
-This project is open-source and available under the [MIT License](LICENSE).
